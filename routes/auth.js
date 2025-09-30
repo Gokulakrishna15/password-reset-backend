@@ -15,7 +15,7 @@ router.post('/request-reset', async (req, res) => {
 
     const token = crypto.randomBytes(32).toString('hex');
     user.resetToken = token;
-    user.resetTokenExpiry = Date.now() + 3600000;
+    user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
     await user.save();
 
     const transporter = nodemailer.createTransport({
@@ -26,7 +26,7 @@ router.post('/request-reset', async (req, res) => {
       }
     });
 
-    const resetLink = `http://localhost:5173/reset-password/${token}`;
+    const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
     await transporter.sendMail({
       to: user.email,
       subject: 'Password Reset',

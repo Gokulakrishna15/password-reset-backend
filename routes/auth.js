@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { Resend } = require('resend');
 
 // ✅ Register
 router.post('/register', async (req, res) => {
@@ -86,30 +86,23 @@ router.post('/request-reset', async (req, res) => {
     user.resetTokenExpiry = Date.now() + 3600000;
     await user.save();
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      },
-      logger: true,
-      debug: true
+    const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    const { data, error } = await resend.emails.send({
+      from: 'Gokulakrishna <onboarding@resend.dev>',
+      to: user.email,
+      subject: 'Password Reset',
+      html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`,
     });
 
-    const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
-
-    try {
-      await transporter.sendMail({
-        to: user.email,
-        subject: 'Password Reset',
-        html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
-      });
-      console.log('✅ Reset email sent to:', user.email);
-      res.json({ message: 'Reset link sent to your email' });
-    } catch (emailErr) {
-      console.error('❌ Email send failed:', emailErr.message);
-      res.status(500).json({ message: 'Failed to send reset email' });
+    if (error) {
+      console.error('❌ Resend error:', error);
+      return res.status(500).json({ message: 'Failed to send reset email' });
     }
+
+    console.log('✅ Reset email sent via Resend:', data.id);
+    res.json({ message: 'Reset link sent to your email' });
   } catch (err) {
     console.error('Reset request error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });

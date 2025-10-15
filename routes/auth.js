@@ -91,18 +91,25 @@ router.post('/request-reset', async (req, res) => {
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-      }
+      },
+      logger: true,
+      debug: true
     });
 
     const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
-    await transporter.sendMail({
-      to: user.email,
-      subject: 'Password Reset',
-      html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
-    });
 
-    console.log('Password reset email sent');
-    res.json({ message: 'Password reset email sent' });
+    try {
+      await transporter.sendMail({
+        to: user.email,
+        subject: 'Password Reset',
+        html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
+      });
+      console.log('✅ Reset email sent to:', user.email);
+      res.json({ message: 'Reset link sent to your email' });
+    } catch (emailErr) {
+      console.error('❌ Email send failed:', emailErr.message);
+      res.status(500).json({ message: 'Failed to send reset email' });
+    }
   } catch (err) {
     console.error('Reset request error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });

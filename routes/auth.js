@@ -4,7 +4,17 @@ const User = require('../models/User');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
+
+// ✅ Setup Brevo transporter
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  auth: {
+    user: process.env.BREVO_SMTP_LOGIN,
+    pass: process.env.BREVO_SMTP_KEY
+  }
+});
 
 // ✅ Register
 router.post('/register', async (req, res) => {
@@ -87,27 +97,16 @@ router.post('/request-reset', async (req, res) => {
     await user.save();
 
     const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
-    const resend = new Resend(process.env.RESEND_API_KEY);
 
-    try {
-      const { data, error } = await resend.emails.send({
-        from: 'onboarding@resend.dev',
-        to: user.email,
-        subject: 'Password Reset',
-        html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`,
-      });
+    await transporter.sendMail({
+      from: process.env.BREVO_SMTP_LOGIN,
+      to: user.email,
+      subject: 'Password Reset',
+      html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
+    });
 
-      if (error) {
-        console.error('❌ Resend error:', error);
-        return res.status(500).json({ message: 'Failed to send reset email' });
-      }
-
-      console.log('✅ Reset email sent via Resend:', data.id);
-      res.json({ message: 'Reset link sent to your email' });
-    } catch (emailErr) {
-      console.error('❌ Email send failed:', emailErr.message);
-      res.status(500).json({ message: 'Email service error', error: emailErr.message });
-    }
+    console.log('✅ Reset email sent via Brevo');
+    res.json({ message: 'Reset link sent to your email' });
   } catch (err) {
     console.error('Reset request error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });

@@ -4,22 +4,12 @@ const User = require('../models/User');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
+const SibApiV3Sdk = require('sib-api-v3-sdk');
 
-// ✅ Setup Brevo transporter with TLS and timeout
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.BREVO_SMTP_LOGIN,
-    pass: process.env.BREVO_SMTP_KEY
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 10000
-});
+// ✅ Setup Brevo API client
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+defaultClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
+const brevoEmail = new SibApiV3Sdk.TransactionalEmailsApi();
 
 // ✅ Register
 router.post('/register', async (req, res) => {
@@ -80,7 +70,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ✅ Request password reset
+// ✅ Request password reset using Brevo API
 router.post('/request-reset', async (req, res) => {
   const { email } = req.body;
   console.log('Incoming reset request for:', email);
@@ -103,14 +93,16 @@ router.post('/request-reset', async (req, res) => {
 
     const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
 
-    await transporter.sendMail({
-      from: process.env.BREVO_SMTP_LOGIN,
-      to: user.email,
+    const emailData = {
+      sender: { name: 'Password Reset', email: 'noreply@yourdomain.com' },
+      to: [{ email: user.email }],
       subject: 'Password Reset',
-      html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
-    });
+      htmlContent: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
+    };
 
-    console.log('✅ Reset email sent via Brevo');
+    await brevoEmail.sendTransacEmail(emailData);
+
+    console.log('✅ Reset email sent via Brevo API');
     res.json({ message: 'Reset link sent to your email' });
   } catch (err) {
     console.error('Reset request error:', err.message);

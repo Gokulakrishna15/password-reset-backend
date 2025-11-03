@@ -94,7 +94,7 @@ router.post('/request-reset', async (req, res) => {
     const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
 
     const emailData = {
-      sender: { name: 'Password Reset', email: 'noreply@yourdomain.com' },
+      sender: { name: 'Password Reset', email: '9aabb2001@smtp-brevo.com' }, // ✅ Verified sender
       to: [{ email: user.email }],
       subject: 'Password Reset',
       htmlContent: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`

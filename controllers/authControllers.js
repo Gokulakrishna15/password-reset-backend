@@ -1,7 +1,13 @@
 import crypto from 'crypto';
 import User from '../models/User.js';
-import nodemailer from 'nodemailer';
+import SibApiV3Sdk from 'sib-api-v3-sdk';
 
+// ✅ Setup Brevo API client
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+defaultClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
+const brevoEmail = new SibApiV3Sdk.TransactionalEmailsApi();
+
+// ✅ Forgot Password
 export async function forgotPassword(req, res) {
   const { email } = req.body;
   console.log("📨 Forgot password request received for:", email);
@@ -13,28 +19,24 @@ export async function forgotPassword(req, res) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
-    user.resetToken = token;
-    user.resetTokenExpiry = Date.now() + 3600000;
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    user.resetPasswordExpire = Date.now() + 3600000; // 1 hour
     await user.save();
-    console.log("✅ Token generated and saved:", token);
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-
-    const resetLink = `${process.env.CLIENT_URL}/reset-password/${token}`;
+    const resetLink = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
     console.log("🔗 Reset link:", resetLink);
 
-    await transporter.sendMail({
-      to: user.email,
+    // Send email via Brevo
+    const emailData = {
+      sender: { name: 'Password Reset', email: process.env.BREVO_SENDER },
+      to: [{ email: user.email }],
       subject: 'Password Reset',
-      html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`,
-    });
+      htmlContent: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
+    };
+
+    await brevoEmail.sendTransacEmail(emailData);
 
     console.log("📤 Email sent to:", user.email);
     res.json({ message: 'Reset link sent to your email' });
@@ -44,15 +46,19 @@ export async function forgotPassword(req, res) {
   }
 }
 
+// ✅ Reset Password
 export async function resetPassword(req, res) {
   const { token } = req.params;
   const { password } = req.body;
   console.log("🔒 Reset password request with token:", token);
 
   try {
+    // Hash token to compare with DB
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
     const user = await User.findOne({
-      resetToken: token,
-      resetTokenExpiry: { $gt: Date.now() },
+      resetPasswordToken: hashedToken,
+      resetPasswordExpire: { $gt: Date.now() },
     });
 
     if (!user) {
@@ -60,9 +66,10 @@ export async function resetPassword(req, res) {
       return res.status(400).json({ message: 'Invalid or expired token' });
     }
 
+    // Update password
     user.password = password;
-    user.resetToken = undefined;
-    user.resetTokenExpiry = undefined;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
     await user.save();
 
     console.log("✅ Password updated for:", user.email);

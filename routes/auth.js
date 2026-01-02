@@ -1,6 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import SibApiV3Sdk from 'sib-api-v3-sdk';
 import User from '../models/User.js';
@@ -33,15 +33,16 @@ router.post('/request-reset', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // Generate secure reset token
     const token = crypto.randomBytes(32).toString('hex');
-    user.resetToken = token;
-    user.resetTokenExpiry = Date.now() + 3600000;
+    user.resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
+    user.resetPasswordExpire = Date.now() + 3600000; // 1 hour
     await user.save();
 
     const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
 
     const emailData = {
-      sender: { name: 'Password Reset', email: '9aabb2001@smtp-brevo.com' },
+      sender: { name: 'Password Reset', email: process.env.BREVO_SENDER },
       to: [{ email: user.email }],
       subject: 'Password Reset',
       htmlContent: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`

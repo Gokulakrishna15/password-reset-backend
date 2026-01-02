@@ -1,3 +1,4 @@
+// routes/auth.js
 import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -12,6 +13,60 @@ const router = express.Router();
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 defaultClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
 const brevoEmail = new SibApiV3Sdk.TransactionalEmailsApi();
+
+// ✅ Register route
+router.post('/register', async (req, res) => {
+  const { name, email, password } = req.body;
+
+  try {
+    let user = await User.findOne({ email });
+    if (user) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    user = new User({ name, email, password });
+    await user.save();
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    res.status(201).json({
+      message: 'User registered successfully',
+      token,
+      user: { id: user._id, name: user.name, email: user.email },
+    });
+  } catch (err) {
+    console.error('🔥 Register error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ✅ Login route
+router.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ email }).select('+password');
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: { id: user._id, name: user.name, email: user.email },
+    });
+  } catch (err) {
+    console.error('🔥 Login error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // ✅ Forgot Password (via controller)
 router.post('/forgot-password', forgotPassword);
@@ -39,7 +94,7 @@ router.post('/request-reset', async (req, res) => {
     user.resetPasswordExpire = Date.now() + 3600000; // 1 hour
     await user.save();
 
-    const resetLink = `https://stunning-torrone-705f39.netlify.app/reset-password/${token}`;
+    const resetLink = `${process.env.CLIENT_URL}/reset-password/${token}`;
 
     const emailData = {
       sender: { name: 'Password Reset', email: process.env.BREVO_SENDER },

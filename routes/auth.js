@@ -1,4 +1,3 @@
-// routes/auth.js
 import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -9,14 +8,16 @@ import { forgotPassword, resetPassword } from '../controllers/authControllers.js
 
 const router = express.Router();
 
-// ✅ Setup Brevo API client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 defaultClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
 const brevoEmail = new SibApiV3Sdk.TransactionalEmailsApi();
 
-// ✅ Register route
 router.post('/register', async (req, res) => {
   const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'Name, email, and password are required' });
+  }
 
   try {
     let user = await User.findOne({ email });
@@ -40,9 +41,12 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// ✅ Login route
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required' });
+  }
 
   try {
     const user = await User.findOne({ email }).select('+password');
@@ -68,11 +72,9 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ✅ Forgot Password (via controller)
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);
 
-// ✅ Request password reset using Brevo API
 router.post('/request-reset', async (req, res) => {
   const { email } = req.body;
   console.log('📨 Incoming reset request for:', email);
@@ -88,11 +90,12 @@ router.post('/request-reset', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Generate secure reset token
     const token = crypto.randomBytes(32).toString('hex');
     user.resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
     user.resetPasswordExpire = Date.now() + 3600000; // 1 hour
-    await user.save();
+
+    // Skip validation to avoid failing on legacy users missing required fields
+    await user.save({ validateBeforeSave: false });
 
     const resetLink = `${process.env.CLIENT_URL}/reset-password/${token}`;
 

@@ -104,17 +104,21 @@ router.post('/request-reset', async (req, res) => {
     user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
     await user.save();
 
-    const resetLink = `${process.env.FRONTEND_URL || 'https://adorable-queijadas-9f8674.netlify.app'}/reset-password/${token}`;
+    const resetLink = `https://password-reset-frontend-prod.netlify.app/reset-password/${token}`;
 
     console.log('🔗 Reset link generated:', resetLink);
     console.log('📧 Sending email via Brevo...');
 
+    // ✅ FIXED: Correct Brevo email structure
     const sendSmtpEmail = {
       sender: { 
         name: 'Password Reset',
-        email: process.env.BREVO_SENDER_EMAIL || 'gokulakrishna578@10136498.brevosend.com'
+        email: 'gokulakrishna578@10136498.brevosend.com'
       },
-      to: [{ email: user.email, name: user.username }],
+      to: [{ 
+        email: user.email,
+        name: user.username 
+      }],
       subject: 'Password Reset Request',
       htmlContent: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">

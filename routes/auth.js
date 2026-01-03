@@ -1,119 +1,190 @@
-import express from 'express';
-import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import SibApiV3Sdk from 'sib-api-v3-sdk';
-import User from '../models/User.js';
-import { forgotPassword, resetPassword } from '../controllers/authControllers.js';
-
+const express = require('express');
 const router = express.Router();
+const User = require('../models/User');
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const SibApiV3Sdk = require('sib-api-v3-sdk');
 
+// Setup Brevo API
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 defaultClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
 const brevoEmail = new SibApiV3Sdk.TransactionalEmailsApi();
 
+// Register
 router.post('/register', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { username, email, password } = req.body;
+  console.log('📝 Register request:', { username, email });
 
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'Name, email, and password are required' });
+  if (!username || !email || !password) {
+    return res.status(400).json({ message: 'All fields are required' });
+  }
+
+  if (password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters' });
   }
 
   try {
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ email: email.toLowerCase() });
     if (user) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: 'Email already registered' });
     }
 
-    user = new User({ name, email, password });
+    const hashed = await bcrypt.hash(password, 12);
+    user = new User({
+      username,
+      email: email.toLowerCase(),
+      password: hashed
+    });
     await user.save();
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-    res.status(201).json({
-      message: 'User registered successfully',
-      token,
-      user: { id: user._id, name: user.name, email: user.email },
-    });
+    console.log('✅ User registered:', email);
+    res.status(201).json({ message: 'User registered successfully' });
   } catch (err) {
-    console.error('🔥 Register error:', err);
+    console.error('❌ Register error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
+// Login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
+  console.log('🔐 Login request:', { email });
 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required' });
   }
 
   try {
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    const isMatch = await user.matchPassword(password);
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
+    console.log('✅ Login successful:', email);
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user._id, name: user.name, email: user.email },
+      user: { id: user._id, username: user.username, email: user.email }
     });
   } catch (err) {
-    console.error('🔥 Login error:', err);
+    console.error('❌ Login error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password/:token', resetPassword);
-
+// Request Password Reset
 router.post('/request-reset', async (req, res) => {
   const { email } = req.body;
-  console.log('📨 Incoming reset request for:', email);
+  console.log('📧 Reset request for:', email);
 
   if (!email) {
     return res.status(400).json({ message: 'Email is required' });
   }
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      console.log('❌ User not found');
-      return res.status(404).json({ message: 'User not found' });
+      console.log('⚠️ User not found, but sending generic response');
+      return res.json({ message: 'If an account exists, a reset link has been sent.' });
     }
 
+    // Generate secure token
     const token = crypto.randomBytes(32).toString('hex');
-    user.resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
-    user.resetPasswordExpire = Date.now() + 3600000; // 1 hour
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    
+    user.resetToken = hashedToken;
+    user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
+    await user.save();
 
-    // Skip validation to avoid failing on legacy users missing required fields
-    await user.save({ validateBeforeSave: false });
+    const resetLink = `${process.env.FRONTEND_URL || 'https://adorable-queijadas-9f8674.netlify.app'}/reset-password/${token}`;
 
-    const resetLink = `${process.env.CLIENT_URL}/reset-password/${token}`;
+    console.log('🔗 Reset link generated:', resetLink);
+    console.log('📧 Sending email via Brevo...');
 
-    const emailData = {
-      sender: { name: 'Password Reset', email: process.env.BREVO_SENDER },
-      to: [{ email: user.email }],
-      subject: 'Password Reset',
-      htmlContent: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`
+    const sendSmtpEmail = {
+      sender: { 
+        name: 'Password Reset',
+        email: process.env.BREVO_SENDER_EMAIL || 'gokulakrishna578@10136498.brevosend.com'
+      },
+      to: [{ email: user.email, name: user.username }],
+      subject: 'Password Reset Request',
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb;">Password Reset Request</h2>
+          <p>Hello ${user.username},</p>
+          <p>You requested to reset your password. Click the button below:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetLink}" 
+               style="background-color: #2563eb; 
+                      color: white; 
+                      padding: 12px 30px; 
+                      text-decoration: none; 
+                      border-radius: 5px;
+                      display: inline-block;">
+              Reset Password
+            </a>
+          </div>
+          <p>Or copy this link: ${resetLink}</p>
+          <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            This link expires in 1 hour.<br>
+            If you didn't request this, ignore this email.
+          </p>
+        </div>
+      `
     };
 
-    await brevoEmail.sendTransacEmail(emailData);
+    await brevoEmail.sendTransacEmail(sendSmtpEmail);
 
-    console.log('✅ Reset email sent via Brevo API');
-    res.json({ message: 'Reset link sent to your email' });
+    console.log('✅ Email sent successfully to:', email);
+    res.json({ message: 'If an account exists, a reset link has been sent.' });
   } catch (err) {
-    console.error('🔥 Reset request error:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('❌ Reset error:', err);
+    console.error('Error details:', err.response ? err.response.body : err.message);
+    res.status(500).json({ message: 'Unable to send reset email' });
   }
 });
 
-export default router;
+// Reset Password
+router.post('/reset-password/:token', async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+  console.log('🔄 Reset password request');
+
+  if (!password || password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters' });
+  }
+
+  try {
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      resetToken: hashedToken,
+      resetTokenExpiry: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired token' });
+    }
+
+    user.password = await bcrypt.hash(password, 12);
+    user.resetToken = undefined;
+    user.resetTokenExpiry = undefined;
+    await user.save();
+
+    console.log('✅ Password reset successful for:', user.email);
+    res.json({ message: 'Password reset successful' });
+  } catch (err) {
+    console.error('❌ Reset password error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+module.exports = router;

@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema({
     required: true,
     minlength: 8
   },
+  // For password reset flow (hashed token + expiry)
   resetToken: {
     type: String,
     default: undefined

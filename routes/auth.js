@@ -71,10 +71,10 @@ router.post('/request-reset', async (req, res) => {
     user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
     await user.save({ validateBeforeSave: false });
 
-    const resetLink = `${process.env.CLIENT_URL}/reset-password/${token}`;
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password/${token}`;
 
     const sendSmtpEmail = {
-      sender: { name: 'Password Reset', email: process.env.BREVO_SENDER },
+      sender: { name: 'Password Reset', email: process.env.BREVO_SENDER_EMAIL }, // ✅ FIXED
       to: [{ email: user.email, name: user.username }],
       subject: 'Password Reset Request',
       htmlContent: `
